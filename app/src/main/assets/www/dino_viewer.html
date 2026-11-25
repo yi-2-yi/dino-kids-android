@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>3D Dinosaur Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(180deg, #8fd3f4 0%, #d4f1c5 70%, #f6e7c1 100%);
+      transition: background 0.5s ease;
+      touch-action: none;
+    }
+    body.sunset {
+      background: linear-gradient(180deg, #ff8c61 0%, #ffd166 65%, #e8a87c 100%);
+    }
+    body.ocean {
+      background: linear-gradient(180deg, #4fc3f7 0%, #80deea 65%, #b2ebf2 100%);
+    }
+    #canvas-wrap {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+    .hint-pill {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.82);
+      color: #2d4739;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 999px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0.95;
+      transition: opacity 0.6s ease;
+    }
+    .hint-pill.hidden { opacity: 0; }
+    .controls {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+    .ctrl-btn {
+      border: none;
+      background: rgba(255, 255, 255, 0.9);
+      color: #243b2f;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 13px;
+      border-radius: 999px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.2s ease;
+    }
+    .ctrl-btn:active { transform: scale(0.93); }
+    .ctrl-btn.primary {
+      background: #ff7b29;
+      color: #ffffff;
+    }
+    .ctrl-btn.active {
+      background: #2e9e63;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-wrap">
+    <div id="hint" class="hint-pill">👆 拖动旋转 360° · 双指缩放 · 点恐龙动一动</div>
+    <div class="controls">
+      <button id="btn-action" class="ctrl-btn primary">🦖 动一动</button>
+      <button id="btn-rotate" class="ctrl-btn active">🔄 旋转</button>
+      <button id="btn-theme" class="ctrl-btn">☀️ 阳光</button>
+      <button id="btn-reset" class="ctrl-btn">🎯 复位</button>
+    </div>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="lib/OrbitControls.js"></script>
+  <script src="dinos3d.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      let currentDinoId = params.get('dino') || 'trex';
+      let isSunset = false;
+      let autoRotate = true;
+      let actionProgress = 0;
+      let actionPlaying = false;
+
+      const wrap = document.getElementById('canvas-wrap');
+      const hintEl = document.getElementById('hint');
+      const btnAction = document.getElementById('btn-action');
+      const btnRotate = document.getElementById('btn-rotate');
+      const btnTheme = document.getElementById('btn-theme');
+      const btnReset = document.getElementById('btn-reset');
+
+      const scene = new THREE.Scene();
+
+      const camera = new THREE.PerspectiveCamera(42, wrap.clientWidth / Math.max(1, wrap.clientHeight), 0.1, 100);
+      camera.position.set(4.0, 2.3, 4.2);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      wrap.appendChild(renderer.domElement);
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.enablePan = false;
+      controls.minDistance = 2.2;
+      controls.maxDistance = 9.5;
+      controls.maxPolarAngle = Math.PI * 0.49;
+      controls.autoRotate = autoRotate;
+      controls.autoRotateSpeed = 1.4;
+
+      // Warm cheerful lighting
+      const hemiLight = new THREE.HemisphereLight(0xfffbe8, 0x5c8a47, 0.9);
+      scene.add(hemiLight);
+
+      const sunLight = new THREE.DirectionalLight(0xfff5d6, 1.25);
+      sunLight.position.set(5, 8, 5);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 1024;
+      sunLight.shadow.mapSize.height = 1024;
+      sunLight.shadow.camera.near = 1;
+      sunLight.shadow.camera.far = 22;
+      const d = 4.5;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
+      scene.add(sunLight);
+
+      const rimLight = new THREE.DirectionalLight(0x8be0ff, 0.45);
+      rimLight.position.set(-5, 4, -4);
+      scene.add(rimLight);
+
+      let stageGroup = new THREE.Group();
+      scene.add(stageGroup);
+
+      let currentModel = null;
+      let currentDiorama = null;
+      let defaultCam = [4.0, 2.3, 4.2];
+      let defaultTarget = [0, 1.3, 0];
+
+      function applyBackground() {
+        document.body.classList.remove('sunset', 'ocean');
+        if (isSunset) {
+          document.body.classList.add('sunset');
+          sunLight.color.setHex(0xff9b54);
+          sunLight.intensity = 1.45;
+          hemiLight.color.setHex(0xffd2a6);
+          btnTheme.textContent = '🌅 黄昏';
+        } else {
+          if (currentModel && currentModel.diorama === 'ocean') {
+            document.body.classList.add('ocean');
+          }
+          sunLight.color.setHex(0xfff5d6);
+          sunLight.intensity = 1.25;
+          hemiLight.color.setHex(0xfffbe8);
+          btnTheme.textContent = '☀️ 阳光';
+        }
+      }
+
+      function loadDino(id) {
+        currentDinoId = id || 'trex';
+        while (stageGroup.children.length > 0) {
+          stageGroup.remove(stageGroup.children[0]);
+        }
+        currentModel = window.Dino3D.build(currentDinoId);
+        currentDiorama = window.Dino3D.createDiorama(currentModel.diorama || 'jungle');
+        stageGroup.add(currentDiorama);
+        stageGroup.add(currentModel.group);
+
+        defaultCam = currentModel.cameraPos || [4.0, 2.3, 4.2];
+        defaultTarget = currentModel.target || [0, 1.3, 0];
+        resetCamera();
+        applyBackground();
+      }
+
+      function resetCamera() {
+        camera.position.set(defaultCam[0], defaultCam[1], defaultCam[2]);
+        controls.target.set(defaultTarget[0], defaultTarget[1], defaultTarget[2]);
+        controls.update();
+      }
+
+      function triggerAction() {
+        actionPlaying = true;
+        actionProgress = 0;
+        window.Dino3D.playDinoSound(currentDinoId);
+      }
+
+      // Tap on canvas (without dragging) triggers dinosaur fun animation!
+      let downX = 0, downY = 0, downTime = 0;
+      renderer.domElement.addEventListener('pointerdown', (e) => {
+        downX = e.clientX;
+        downY = e.clientY;
+        downTime = Date.now();
+        hintEl.classList.add('hidden');
+      });
+      renderer.domElement.addEventListener('pointerup', (e) => {
+        const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+        if (dist < 10 && Date.now() - downTime < 350) {
+          triggerAction();
+        }
+      });
+
+      btnAction.addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerAction();
+      });
+      btnRotate.addEventListener('click', (e) => {
+        e.stopPropagation();
+        autoRotate = !autoRotate;
+        controls.autoRotate = autoRotate;
+        btnRotate.classList.toggle('active', autoRotate);
+      });
+      btnTheme.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isSunset = !isSunset;
+        applyBackground();
+      });
+      btnReset.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resetCamera();
+      });
+
+      window.addEventListener('resize', () => {
+        const w = wrap.clientWidth;
+        const h = Math.max(1, wrap.clientHeight);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      // Expose JS bridge for native Android WebView
+      window.loadDino = loadDino;
+      window.triggerAction = triggerAction;
+      window.resetCamera = resetCamera;
+
+      loadDino(currentDinoId);
+
+      // Hide hint after 5 seconds
+      setTimeout(() => hintEl.classList.add('hidden'), 5000);
+
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+        const elapsed = clock.elapsedTime;
+
+        if (actionPlaying) {
+          actionProgress += dt * 0.9;
+          if (actionProgress >= 1) {
+            actionProgress = 0;
+            actionPlaying = false;
+          }
+        }
+
+        if (currentModel && currentModel.animate) {
+          currentModel.animate(elapsed, actionProgress);
+        }
+        if (currentDiorama && currentDiorama.userData.update) {
+          currentDiorama.userData.update(elapsed);
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+  </script>
+</body>
+</html>
