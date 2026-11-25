@@ -26,15 +26,23 @@ class DinoRepositoryTest {
     }
 
     @Test
-    fun allDinosaurImageAssetsExist() {
+    fun allDinosaurImageAnd3DAssetsExist() {
         val assetsRoot = File("src/main/assets")
         for (dino in DinoRepository.allDinosaurs) {
             val imgFile = File(assetsRoot, dino.imageAssetPath)
             assertTrue("Missing asset image: ${imgFile.path}", imgFile.exists() && imgFile.length() > 0)
+
+            val glbFile = File(assetsRoot, "www/models/${dino.id}.glb")
+            assertTrue("Missing 3D GLB model: ${glbFile.path}", glbFile.exists() && glbFile.length() > 100_000)
         }
         assertTrue(File(assetsRoot, "www/dino_viewer.html").exists())
         assertTrue(File(assetsRoot, "www/dinos3d.js").exists())
         assertTrue(File(assetsRoot, "www/lib/three.min.js").exists())
         assertTrue(File(assetsRoot, "www/lib/OrbitControls.js").exists())
+        assertTrue(File(assetsRoot, "www/lib/GLTFLoader.js").exists())
+        assertTrue(File(assetsRoot, "www/lib/DRACOLoader.js").exists())
+        assertTrue(File(assetsRoot, "www/lib/meshopt_decoder.js").exists())
+        assertTrue(File(assetsRoot, "www/lib/RoomEnvironment.js").exists())
+        assertTrue(File(assetsRoot, "www/lib/draco/draco_decoder.wasm").exists())
     }
 }

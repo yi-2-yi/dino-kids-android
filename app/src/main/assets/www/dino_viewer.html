@@ -11,15 +11,15 @@
       height: 100%;
       overflow: hidden;
       font-family: system-ui, -apple-system, sans-serif;
-      background: linear-gradient(180deg, #8fd3f4 0%, #d4f1c5 70%, #f6e7c1 100%);
+      background: radial-gradient(circle at 50% 25%, #e6f6ff 0%, #b9e4c9 65%, #9bd1b5 100%);
       transition: background 0.5s ease;
       touch-action: none;
     }
     body.sunset {
-      background: linear-gradient(180deg, #ff8c61 0%, #ffd166 65%, #e8a87c 100%);
+      background: radial-gradient(circle at 50% 25%, #ffe0a3 0%, #ff9f68 58%, #c96f53 100%);
     }
     body.ocean {
-      background: linear-gradient(180deg, #4fc3f7 0%, #80deea 65%, #b2ebf2 100%);
+      background: radial-gradient(circle at 50% 25%, #bceeff 0%, #56ccf2 58%, #2b7de0 100%);
     }
     #canvas-wrap {
       width: 100%;
@@ -31,13 +31,43 @@
       width: 100% !important;
       height: 100% !important;
     }
+    .loader {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: rgba(255, 251, 242, 0.72);
+      backdrop-filter: blur(4px);
+      z-index: 20;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .loader.hidden { opacity: 0; }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 4px solid rgba(47, 143, 91, 0.22);
+      border-top-color: #2f8f5b;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .loader-text {
+      color: #1f3328;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .hint-pill {
       position: absolute;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(255, 255, 255, 0.82);
-      color: #2d4739;
+      background: rgba(255, 255, 255, 0.88);
+      color: #243b2f;
       font-size: 12px;
       font-weight: 700;
       padding: 5px 12px;
@@ -47,6 +77,7 @@
       white-space: nowrap;
       opacity: 0.95;
       transition: opacity 0.6s ease;
+      z-index: 8;
     }
     .hint-pill.hidden { opacity: 0; }
     .controls {
@@ -55,38 +86,40 @@
       left: 50%;
       transform: translateX(-50%);
       display: flex;
-      gap: 8px;
+      flex-wrap: nowrap;
+      gap: 6px;
       z-index: 10;
+      max-width: 96%;
     }
     .ctrl-btn {
       border: none;
-      background: rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.92);
       color: #243b2f;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
-      padding: 8px 13px;
+      padding: 7px 11px;
       border-radius: 999px;
       box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
+      white-space: nowrap;
+      flex-shrink: 0;
       cursor: pointer;
       transition: transform 0.12s ease, background 0.2s ease;
     }
     .ctrl-btn:active { transform: scale(0.93); }
-    .ctrl-btn.primary {
-      background: #ff7b29;
-      color: #ffffff;
-    }
-    .ctrl-btn.active {
-      background: #2e9e63;
-      color: #ffffff;
-    }
+    .ctrl-btn.primary { background: #ff7b29; color: #ffffff; }
+    .ctrl-btn.active { background: #2e9e63; color: #ffffff; }
   </style>
 </head>
 <body>
   <div id="canvas-wrap">
-    <div id="hint" class="hint-pill">👆 拖动旋转 360° · 双指缩放 · 点恐龙动一动</div>
+    <div id="loader" class="loader">
+      <div class="spinner"></div>
+      <div class="loader-text">正在加载精细 3D 恐龙模型…</div>
+    </div>
+    <div id="hint" class="hint-pill">👆 拖动 360° 旋转 · 双指放大 · 轻点恐龙互动</div>
     <div class="controls">
       <button id="btn-action" class="ctrl-btn primary">🦖 动一动</button>
       <button id="btn-rotate" class="ctrl-btn active">🔄 旋转</button>
@@ -97,27 +130,49 @@
 
   <script src="lib/three.min.js"></script>
   <script src="lib/OrbitControls.js"></script>
+  <script src="lib/GLTFLoader.js"></script>
+  <script src="lib/DRACOLoader.js"></script>
+  <script src="lib/meshopt_decoder.js"></script>
+  <script src="lib/RoomEnvironment.js"></script>
   <script src="dinos3d.js"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
       let currentDinoId = params.get('dino') || 'trex';
       let isSunset = false;
-      let autoRotate = true;
+      let autoRotate = params.get('autorotate') !== '0';
       let actionProgress = 0;
       let actionPlaying = false;
+      let loadToken = 0;
+
+      // Per-species framing and orientation for all 10 high-detail PBR GLB models
+      const DINO_CONFIG = {
+        trex:            { file: 'models/trex.glb',            diorama: 'jungle', targetSize: 3.3, rotY: 0.45,  liftY: 0.03, cam: [3.6, 1.9, 3.8] },
+        triceratops:     { file: 'models/triceratops.glb',     diorama: 'jungle', targetSize: 3.3, rotY: 0.55,  liftY: 0.03, cam: [3.6, 1.7, 3.8] },
+        brachiosaurus:   { file: 'models/brachiosaurus.glb',   diorama: 'jungle', targetSize: 3.7, rotY: 0.55,  liftY: 0.03, cam: [4.9, 2.7, 5.2] },
+        stegosaurus:     { file: 'models/stegosaurus.glb',     diorama: 'jungle', targetSize: 3.4, rotY: 1.25,  liftY: 0.03, cam: [3.8, 1.8, 3.9] },
+        ankylosaurus:    { file: 'models/ankylosaurus.glb',    diorama: 'jungle', targetSize: 3.3, rotY: 0.65,  liftY: 0.03, cam: [3.6, 1.8, 3.8] },
+        spinosaurus:     { file: 'models/spinosaurus.glb',     diorama: 'river',  targetSize: 3.6, rotY: 1.35,  liftY: 0.03, cam: [4.0, 1.9, 4.1] },
+        parasaurolophus: { file: 'models/parasaurolophus.glb', diorama: 'jungle', targetSize: 3.4, rotY: 0.65,  liftY: 0.03, cam: [3.8, 1.9, 3.9] },
+        velociraptor:    { file: 'models/velociraptor.glb',    diorama: 'jungle', targetSize: 3.1, rotY: 0.55,  liftY: 0.03, cam: [3.5, 1.8, 3.7] },
+        pteranodon:      { file: 'models/pteranodon.glb',      diorama: 'cliff',  targetSize: 3.0, rotY: 0.45,  liftY: 0.03, cam: [3.8, 2.0, 4.0] },
+        plesiosaurus:    { file: 'models/plesiosaurus.glb',    diorama: 'ocean',  targetSize: 3.5, rotY: 0.65,  liftY: 0.35, cam: [3.9, 2.1, 4.0] },
+      };
 
       const wrap = document.getElementById('canvas-wrap');
+      const loaderEl = document.getElementById('loader');
       const hintEl = document.getElementById('hint');
       const btnAction = document.getElementById('btn-action');
       const btnRotate = document.getElementById('btn-rotate');
       const btnTheme = document.getElementById('btn-theme');
       const btnReset = document.getElementById('btn-reset');
 
+      if (!autoRotate) btnRotate.classList.remove('active');
+
       const scene = new THREE.Scene();
 
-      const camera = new THREE.PerspectiveCamera(42, wrap.clientWidth / Math.max(1, wrap.clientHeight), 0.1, 100);
-      camera.position.set(4.0, 2.3, 4.2);
+      const camera = new THREE.PerspectiveCamera(40, wrap.clientWidth / Math.max(1, wrap.clientHeight), 0.05, 100);
+      camera.position.set(3.6, 1.9, 3.8);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -125,81 +180,116 @@
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.96;
       wrap.appendChild(renderer.domElement);
+
+      // Balanced studio IBL for crisp PBR scales and skin sheen
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
 
       const controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.enablePan = false;
-      controls.minDistance = 2.2;
+      controls.minDistance = 1.8;
       controls.maxDistance = 9.5;
       controls.maxPolarAngle = Math.PI * 0.49;
       controls.autoRotate = autoRotate;
-      controls.autoRotateSpeed = 1.4;
+      controls.autoRotateSpeed = 1.3;
 
-      // Warm cheerful lighting
-      const hemiLight = new THREE.HemisphereLight(0xfffbe8, 0x5c8a47, 0.9);
+      // Balanced 3-point outdoor lighting rig
+      const hemiLight = new THREE.HemisphereLight(0xfffbe8, 0x456b3a, 0.48);
       scene.add(hemiLight);
 
-      const sunLight = new THREE.DirectionalLight(0xfff5d6, 1.25);
-      sunLight.position.set(5, 8, 5);
+      const sunLight = new THREE.DirectionalLight(0xfff4d8, 1.25);
+      sunLight.position.set(5, 8.5, 5.5);
       sunLight.castShadow = true;
       sunLight.shadow.mapSize.width = 1024;
       sunLight.shadow.mapSize.height = 1024;
+      sunLight.shadow.bias = -0.0005;
       sunLight.shadow.camera.near = 1;
       sunLight.shadow.camera.far = 22;
-      const d = 4.5;
+      const d = 4.2;
       sunLight.shadow.camera.left = -d;
       sunLight.shadow.camera.right = d;
       sunLight.shadow.camera.top = d;
       sunLight.shadow.camera.bottom = -d;
       scene.add(sunLight);
 
-      const rimLight = new THREE.DirectionalLight(0x8be0ff, 0.45);
-      rimLight.position.set(-5, 4, -4);
+      const rimLight = new THREE.DirectionalLight(0x9be4ff, 0.42);
+      rimLight.position.set(-5, 4.5, -4.5);
       scene.add(rimLight);
 
-      let stageGroup = new THREE.Group();
+      // GLTF + offline Draco + Meshopt decoders
+      const dracoLoader = new THREE.DRACOLoader();
+      dracoLoader.setDecoderPath('lib/draco/');
+      const gltfLoader = new THREE.GLTFLoader();
+      gltfLoader.setDRACOLoader(dracoLoader);
+      if (window.MeshoptDecoder) {
+        gltfLoader.setMeshoptDecoder(window.MeshoptDecoder);
+      }
+
+      const stageGroup = new THREE.Group();
       scene.add(stageGroup);
 
-      let currentModel = null;
       let currentDiorama = null;
-      let defaultCam = [4.0, 2.3, 4.2];
-      let defaultTarget = [0, 1.3, 0];
+      let currentPivot = null;
+      let currentMixer = null;
+      let currentClips = { idle: null, action: null };
+      let currentBaseY = 0;
+      let defaultCam = [3.6, 1.9, 3.8];
+      let defaultTarget = [0, 1.0, 0];
 
       function applyBackground() {
+        const cfg = DINO_CONFIG[currentDinoId] || DINO_CONFIG.trex;
         document.body.classList.remove('sunset', 'ocean');
         if (isSunset) {
           document.body.classList.add('sunset');
-          sunLight.color.setHex(0xff9b54);
+          sunLight.color.setHex(0xff9c52);
           sunLight.intensity = 1.45;
           hemiLight.color.setHex(0xffd2a6);
           btnTheme.textContent = '🌅 黄昏';
         } else {
-          if (currentModel && currentModel.diorama === 'ocean') {
+          if (cfg.diorama === 'ocean') {
             document.body.classList.add('ocean');
           }
-          sunLight.color.setHex(0xfff5d6);
+          sunLight.color.setHex(0xfff4d8);
           sunLight.intensity = 1.25;
           hemiLight.color.setHex(0xfffbe8);
           btnTheme.textContent = '☀️ 阳光';
         }
       }
 
-      function loadDino(id) {
-        currentDinoId = id || 'trex';
+      function clearStage() {
+        if (currentMixer) {
+          currentMixer.stopAllAction();
+          currentMixer = null;
+        }
+        currentClips = { idle: null, action: null };
+        currentPivot = null;
+        currentDiorama = null;
         while (stageGroup.children.length > 0) {
           stageGroup.remove(stageGroup.children[0]);
         }
-        currentModel = window.Dino3D.build(currentDinoId);
-        currentDiorama = window.Dino3D.createDiorama(currentModel.diorama || 'jungle');
-        stageGroup.add(currentDiorama);
-        stageGroup.add(currentModel.group);
+      }
 
-        defaultCam = currentModel.cameraPos || [4.0, 2.3, 4.2];
-        defaultTarget = currentModel.target || [0, 1.3, 0];
-        resetCamera();
-        applyBackground();
+      function pickAnimations(mixer, animations) {
+        if (!animations || animations.length === 0) return { idle: null, action: null };
+        const byLower = (names) =>
+          animations.find((clip) => names.some((n) => clip.name.toLowerCase().includes(n)));
+
+        const idleClip = byLower(['idle']) || animations[0];
+        const actionClip = byLower(['attack', 'walk', 'run', 'jump']) || animations[0];
+
+        const idleAct = mixer.clipAction(idleClip);
+        idleAct.play();
+
+        const actionAct = actionClip === idleClip ? null : mixer.clipAction(actionClip);
+        if (actionAct) {
+          actionAct.setLoop(THREE.LoopRepeat, 2);
+        }
+        return { idle: idleAct, action: actionAct };
       }
 
       function resetCamera() {
@@ -208,13 +298,103 @@
         controls.update();
       }
 
+      function loadDino(id) {
+        currentDinoId = DINO_CONFIG[id] ? id : 'trex';
+        const cfg = DINO_CONFIG[currentDinoId];
+        const token = ++loadToken;
+
+        loaderEl.classList.remove('hidden');
+        clearStage();
+
+        currentDiorama = window.Dino3D.createDiorama(cfg.diorama);
+        stageGroup.add(currentDiorama);
+        applyBackground();
+
+        gltfLoader.load(
+          cfg.file,
+          (gltf) => {
+            if (token !== loadToken) return;
+
+            const model = gltf.scene;
+            model.traverse((node) => {
+              if (node.isMesh) {
+                node.castShadow = true;
+                node.receiveShadow = true;
+                if (node.material) {
+                  const mats = Array.isArray(node.material) ? node.material : [node.material];
+                  mats.forEach((m) => {
+                    if (m.map) m.map.encoding = THREE.sRGBEncoding;
+                    m.envMapIntensity = 0.65;
+                    m.needsUpdate = true;
+                  });
+                }
+              }
+            });
+
+            // Normalize size & position cleanly onto the diorama pedestal
+            model.updateMatrixWorld(true);
+            const rawBox = new THREE.Box3().setFromObject(model);
+            const rawSize = rawBox.getSize(new THREE.Vector3());
+            const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z, 0.001);
+            const scale = cfg.targetSize / maxDim;
+            model.scale.setScalar(scale);
+
+            model.updateMatrixWorld(true);
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            model.position.set(-center.x, -box.min.y + cfg.liftY, -center.z);
+
+            const pivot = new THREE.Group();
+            pivot.add(model);
+            pivot.rotation.y = cfg.rotY;
+            stageGroup.add(pivot);
+
+            currentPivot = pivot;
+            currentBaseY = pivot.position.y;
+
+            const finalHeight = rawSize.y * scale;
+            defaultTarget = [0, cfg.liftY + finalHeight * 0.48, 0];
+            defaultCam = cfg.cam;
+            resetCamera();
+
+            if (gltf.animations && gltf.animations.length > 0) {
+              currentMixer = new THREE.AnimationMixer(model);
+              currentClips = pickAnimations(currentMixer, gltf.animations);
+            }
+
+            loaderEl.classList.add('hidden');
+            window.__dinoLoaded = currentDinoId;
+          },
+          undefined,
+          (err) => {
+            console.error('GLB load failed:', err);
+            loaderEl.classList.add('hidden');
+          }
+        );
+      }
+
       function triggerAction() {
         actionPlaying = true;
         actionProgress = 0;
         window.Dino3D.playDinoSound(currentDinoId);
+
+        if (currentMixer && currentClips.action && currentClips.idle) {
+          currentClips.action.reset();
+          currentClips.action.setEffectiveTimeScale(1.15);
+          currentClips.action.setEffectiveWeight(1.0);
+          currentClips.action.play();
+          currentClips.idle.crossFadeTo(currentClips.action, 0.2, true);
+
+          const durMs = Math.min(2600, Math.max(1200, currentClips.action.getClip().duration * 1600));
+          setTimeout(() => {
+            if (currentClips.idle && currentClips.action) {
+              currentClips.idle.reset().play();
+              currentClips.action.crossFadeTo(currentClips.idle, 0.3, true);
+            }
+          }, durMs);
+        }
       }
 
-      // Tap on canvas (without dragging) triggers dinosaur fun animation!
       let downX = 0, downY = 0, downTime = 0;
       renderer.domElement.addEventListener('pointerdown', (e) => {
         downX = e.clientX;
@@ -229,10 +409,7 @@
         }
       });
 
-      btnAction.addEventListener('click', (e) => {
-        e.stopPropagation();
-        triggerAction();
-      });
+      btnAction.addEventListener('click', (e) => { e.stopPropagation(); triggerAction(); });
       btnRotate.addEventListener('click', (e) => {
         e.stopPropagation();
         autoRotate = !autoRotate;
@@ -244,10 +421,7 @@
         isSunset = !isSunset;
         applyBackground();
       });
-      btnReset.addEventListener('click', (e) => {
-        e.stopPropagation();
-        resetCamera();
-      });
+      btnReset.addEventListener('click', (e) => { e.stopPropagation(); resetCamera(); });
 
       window.addEventListener('resize', () => {
         const w = wrap.clientWidth;
@@ -257,14 +431,11 @@
         renderer.setSize(w, h);
       });
 
-      // Expose JS bridge for native Android WebView
       window.loadDino = loadDino;
       window.triggerAction = triggerAction;
       window.resetCamera = resetCamera;
 
       loadDino(currentDinoId);
-
-      // Hide hint after 5 seconds
       setTimeout(() => hintEl.classList.add('hidden'), 5000);
 
       const clock = new THREE.Clock();
@@ -273,17 +444,34 @@
         const dt = Math.min(clock.getDelta(), 0.05);
         const elapsed = clock.elapsedTime;
 
+        if (currentMixer) {
+          currentMixer.update(dt);
+        }
+
         if (actionPlaying) {
-          actionProgress += dt * 0.9;
+          actionProgress += dt * 1.15;
           if (actionProgress >= 1) {
             actionProgress = 0;
             actionPlaying = false;
           }
         }
 
-        if (currentModel && currentModel.animate) {
-          currentModel.animate(elapsed, actionProgress);
+        if (currentPivot) {
+          const hasRig = Boolean(currentMixer);
+          const hop = Math.sin(actionProgress * Math.PI);
+          const cfg = DINO_CONFIG[currentDinoId];
+          if (!hasRig) {
+            const breath = Math.sin(elapsed * 2.2) * 0.012;
+            currentPivot.scale.set(1 - breath * 0.4, 1 + breath, 1 - breath * 0.4);
+            currentPivot.position.y = currentBaseY + hop * 0.24;
+            currentPivot.rotation.z = Math.sin(actionProgress * Math.PI * 4) * 0.06 * hop;
+            currentPivot.rotation.x = -hop * 0.09;
+          } else {
+            const floatAmp = cfg && cfg.diorama === 'ocean' ? 0.08 : 0.0;
+            currentPivot.position.y = currentBaseY + Math.sin(elapsed * 2.0) * floatAmp + hop * 0.14;
+          }
         }
+
         if (currentDiorama && currentDiorama.userData.update) {
           currentDiorama.userData.update(elapsed);
         }

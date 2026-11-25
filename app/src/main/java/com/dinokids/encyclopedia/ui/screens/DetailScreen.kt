@@ -70,6 +70,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onOpenFullScreenImage: () -> Unit,
     onOpenFullScreen3D: () -> Unit
 ) {
     var show3D by rememberSaveable { mutableStateOf(false) }
@@ -242,7 +243,7 @@ fun DetailScreen(
                             placeholderColor = dino.softBgColor,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clickable { speaker.speakZh(dino.nameZh) }
+                                .clickable { onOpenFullScreenImage() }
                         )
 
                         // Page indicator badge
@@ -260,6 +261,37 @@ fun DetailScreen(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
+                        }
+
+                        // Fullscreen Image button (Top-Right)
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = Color.White.copy(alpha = 0.9f),
+                            shadowElevation = 3.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onOpenFullScreenImage() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Fullscreen,
+                                    contentDescription = "全屏看图",
+                                    tint = DeepForestText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "全屏看图",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepForestText
+                                )
+                            }
                         }
 
                         // Quick CTA to jump into 3D mode!

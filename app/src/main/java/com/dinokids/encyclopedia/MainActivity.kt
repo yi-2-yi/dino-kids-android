@@ -15,6 +15,7 @@ import com.dinokids.encyclopedia.audio.DinoSpeaker
 import com.dinokids.encyclopedia.model.DinoRepository
 import com.dinokids.encyclopedia.ui.screens.DetailScreen
 import com.dinokids.encyclopedia.ui.screens.FullScreen3DScreen
+import com.dinokids.encyclopedia.ui.screens.FullScreenImageScreen
 import com.dinokids.encyclopedia.ui.screens.HomeScreen
 import com.dinokids.encyclopedia.ui.theme.DinoKidsTheme
 
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
 private enum class ScreenMode {
     HOME,
     DETAIL,
+    FULLSCREEN_IMAGE,
     FULLSCREEN_3D
 }
 
@@ -54,10 +56,19 @@ private fun DinoKidsAppRoot(speaker: DinoSpeaker) {
     val currentIndex = allDinos.indexOfFirst { it.id == selectedDinoId }.coerceAtLeast(0)
     val currentDino = allDinos[currentIndex]
 
+    val goPrev = {
+        val prevIdx = if (currentIndex == 0) allDinos.lastIndex else currentIndex - 1
+        selectedDinoId = allDinos[prevIdx].id
+    }
+    val goNext = {
+        val nextIdx = (currentIndex + 1) % allDinos.size
+        selectedDinoId = allDinos[nextIdx].id
+    }
+
     BackHandler(enabled = screenMode != ScreenMode.HOME) {
         speaker.stop()
         screenMode = when (screenMode) {
-            ScreenMode.FULLSCREEN_3D -> ScreenMode.DETAIL
+            ScreenMode.FULLSCREEN_3D, ScreenMode.FULLSCREEN_IMAGE -> ScreenMode.DETAIL
             ScreenMode.DETAIL -> ScreenMode.HOME
             ScreenMode.HOME -> ScreenMode.HOME
         }
@@ -87,15 +98,22 @@ private fun DinoKidsAppRoot(speaker: DinoSpeaker) {
                     totalCount = allDinos.size,
                     speaker = speaker,
                     onBack = { screenMode = ScreenMode.HOME },
-                    onPrevious = {
-                        val prevIdx = if (currentIndex == 0) allDinos.lastIndex else currentIndex - 1
-                        selectedDinoId = allDinos[prevIdx].id
-                    },
-                    onNext = {
-                        val nextIdx = (currentIndex + 1) % allDinos.size
-                        selectedDinoId = allDinos[nextIdx].id
-                    },
+                    onPrevious = goPrev,
+                    onNext = goNext,
+                    onOpenFullScreenImage = { screenMode = ScreenMode.FULLSCREEN_IMAGE },
                     onOpenFullScreen3D = { screenMode = ScreenMode.FULLSCREEN_3D }
+                )
+            }
+
+            ScreenMode.FULLSCREEN_IMAGE -> {
+                FullScreenImageScreen(
+                    dino = currentDino,
+                    currentIndex = currentIndex,
+                    totalCount = allDinos.size,
+                    speaker = speaker,
+                    onPrevious = goPrev,
+                    onNext = goNext,
+                    onClose = { screenMode = ScreenMode.DETAIL }
                 )
             }
 
